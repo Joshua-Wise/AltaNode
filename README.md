@@ -28,3 +28,4 @@ This project implements an ESP8266 microcontroller (NodeMCU) that provides contr
 
 ### Resources
 - [Avigilon Alta API docs](https://openpath.readme.io/)
+- [Project Blog Post](https://jwise.dev/aviligon-alta-api/)
