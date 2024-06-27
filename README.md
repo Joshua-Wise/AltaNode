@@ -1,10 +1,10 @@
 # AltaNode
 A physical control unit for the Avigilon Alta API powered by NodeMCU.
 
-## Project Details
+### Project Details
 This project implements an ESP8266 microcontroller (NodeMCU) that provides control of Avigilon Alta entries via API using physical buttons.
 
-## Features:
+### Features:
 - Connects to WiFi using credentials stored on the SD card.
 - Provides a web interface for configuration of Avigilon Alta API details and WiFi.
 - Implements secure access to configuration pages with username and password authentication.
@@ -12,13 +12,13 @@ This project implements an ESP8266 microcontroller (NodeMCU) that provides contr
 - Provides Over-the-Air (OTA) updates for easy firmware updates.
 - Controls entries via button presses that make use of the Avigilon Alta API.
 
-## Hardware Components:
+### Hardware Components:
 - ESP8266 Microcontroller (NodeMCU)
 - SD Card Module & SD Card
 - Buttons
 - Enclosure
 
-## Software Libraries:
+### Software Libraries:
 - Arduino core for ESP8266
 - ESP8266 WiFi library
 - ESPAsyncWebServer library
@@ -26,5 +26,5 @@ This project implements an ESP8266 microcontroller (NodeMCU) that provides contr
 - AsyncElegantOTA library
 - BearSSL library
 
-## Resources
+### Resources
 - [Avigilon Alta API docs](https://openpath.readme.io/)
