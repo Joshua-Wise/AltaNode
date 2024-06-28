@@ -29,3 +29,13 @@ This project implements an ESP8266 microcontroller (NodeMCU) that provides contr
 ### Resources
 - [Avigilon Alta API docs](https://openpath.readme.io/)
 - [Project Blog Post](https://jwise.dev/aviligon-alta-api/)
+
+### Amazon Hardware List
+- [Enclosure](https://www.amazon.com/uxcell-Button-Control-Station-Aperture/dp/B07WKJM1NJ)
+- [Buttons](https://www.amazon.com/Waterproof-Momentary-Mushroom-Terminal-EJ22-241A/dp/B098FGVVFZ)
+- [NodeMCU](https://www.amazon.com/HiLetgo-Internet-Development-Wireless-Micropython/dp/B081CSJV2V)
+- [SD Card Reader](https://www.amazon.com/dp/B0B7WZQVHS)
+- [Panel Mount Micro-USB (optional)](https://www.amazon.com/QIANRENON-Threaded-Charging-Connector-Dashboard/dp/B0D17N33TX)
+- [Breakout Board (optional)](https://www.amazon.com/dp/B0B85C98FX)
+- [JST Connectors (optional)](https://www.amazon.com/dp/B076HLQ4FX)
+- [6-pin Dupont (optional)](https://www.amazon.com/dp/B0B8YWWXS3)
