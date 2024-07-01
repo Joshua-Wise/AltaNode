@@ -1,6 +1,8 @@
 # AltaNode
 A physical control unit for the Avigilon Alta API powered by NodeMCU.
 
+<img src="https://jwise.dev/content/images/size/w1000/2024/06/altanode.png" width="500" >
+
 ### Project Details
 This project implements an ESP8266 microcontroller (NodeMCU) that provides control of Avigilon Alta entries via API using physical buttons.
 
