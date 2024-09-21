@@ -8,31 +8,40 @@
     <style>.nav{border:1px solid #ccc;border-width:1px 0;list-style:none;margin:0;padding:0;text-align:center}.nav li{display:inline}.nav a{display:inline-block;padding:10px}</style>
     <style>.container {max-width: 500px; margin: 0 auto;}</style>
     <script>
-        function isEmpty() {
-          const values = [
-            document.getElementById("webapiurl").value,
-            document.getElementById("webentry1").value,
-            document.getElementById("webentry2").value,
-            document.getElementById("webentry3").value,
-            document.getElementById("webentry4").value
-          ];
-
-          const hasEmptyValue = values.some(value => value === "");
-
-          if (hasEmptyValue) {
-            alert("Please enter all values before saving!");
-            return false;
-          }
-
-          console.log("Form submitted successfully!");
-          return true;
+      function validateAndSubmit() {
+        const values = [
+          document.getElementById("webapiurl").value,
+          document.getElementById("webentry1").value,
+          document.getElementById("webentry2").value,
+          document.getElementById("webentry3").value,
+          document.getElementById("webentry4").value
+        ];
+        const hasEmptyValue = values.some(value => value.trim() === "");
+        if (hasEmptyValue) {
+          alert("Please enter all values before saving!");
+          return false;
         }
-         function logoutButton() {
-            var xhr = new XMLHttpRequest();
-            xhr.open("GET", "/logout", true);
-            xhr.send();
-            setTimeout(function(){ window.open("/","_self"); }, 1000);
-         }
+        
+        var apiUrlInput = document.getElementById("webapiurl");
+        apiUrlInput.value = encodeURIComponent(apiUrlInput.value); // Re-encode before submission
+        
+        console.log("Form submitted successfully!");
+        return true;
+      }
+
+      function logoutButton() {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/logout", true);
+        xhr.send();
+        setTimeout(function(){ window.open("/","_self"); }, 1000);
+      }
+
+      window.addEventListener('load', function() {
+        const webapiUrlInput = document.getElementById('webapiurl');
+        const encodedUrl = webapiUrlInput.value;
+        const decodedUrl = decodeURIComponent(encodedUrl);
+        webapiUrlInput.value = decodedUrl; // Display the decoded URL
+      });
     </script>
   </head>
   <body>
@@ -42,21 +51,19 @@
         <a href="/">Home</a>
         <a href="/setup">Setup</a>
         <a href="/wifi">Wifi</a>
-         <a href="/" onclick="logoutButton()">Logout</a>
+        <a href="/" onclick="logoutButton()">Logout</a>
       </div>
       <main class='form-signin'>
-        <form action='/saveSetup' onsubmit="return isEmpty()">
+        <form action='/saveSetup' onsubmit="return validateAndSubmit()">
           <br/>
-          <div class='form-floating'><label>API URL</label><input type='text' class='form-control' name='webapiurl' id='webapiurl' value=""></div>
-          <script>
-            const webapiUrlInput = document.querySelector('input[name="webapiurl"]');
-            const encodedUrl = encodeURIComponent(urlValue);
-            webapiUrlInput.value = encodedUrl;
-          </script>
-          <div class='form-floating'><br/><label>EntryID 1</label><input type='text' class='form-control' name='webentry1' id='webentry1'></div>
-          <div class='form-floating'><br/><label>EntryID 2</label><input type='text' class='form-control' name='webentry2' id='webentry2'></div>
-          <div class='form-floating'><br/><label>EntryID 3</label><input type='text' class='form-control' name='webentry3' id='webentry3'></div>
-          <div class='form-floating'><br/><label>EntryID 4</label><input type='text' class='form-control' name='webentry4' id='webentry4'></div>
+          <div class='form-floating'>
+            <label>API URL</label>
+            <input type='text' class='form-control' name='webapiurl' id='webapiurl' value="%%API_URL%%">
+          </div>
+          <div class='form-floating'><br/><label>EntryID 1</label><input type='text' class='form-control' name='webentry1' id='webentry1' value="%%ENTRY1%%"></div>
+          <div class='form-floating'><br/><label>EntryID 2</label><input type='text' class='form-control' name='webentry2' id='webentry2' value="%%ENTRY2%%"></div>
+          <div class='form-floating'><br/><label>EntryID 3</label><input type='text' class='form-control' name='webentry3' id='webentry3' value="%%ENTRY3%%"></div>
+          <div class='form-floating'><br/><label>EntryID 4</label><input type='text' class='form-control' name='webentry4' id='webentry4' value="%%ENTRY4%%"></div>
           <br/><br/><button type='submit'>Save</button>
         </form>
       </main>

@@ -8,248 +8,420 @@
 #include <SPI.h>
 #include <SD.h>
 #include <ArduinoJson.h>
+#include <EEPROM.h>
+#include <AES.h>
 
-// Authentication credentials for web access
+// Constants and global variables
+#define KEY_SIZE 16
+const size_t JSON_BUFFER_SIZE = 768;
+
 const char* http_username = "admin";
 const char* http_password = "altanode";
-
-// Wireless credential variables
-String ssid;
-String password;
-
-// SD card chip select for arduino pin
 const int chipSelect = 15;
-
-// Variables to store altanode configuration from json
-String apiUrl;
-int entryValues[4];  // Array to store values for entries 1-4 (0-3)
-
-// Location of setup files
+const int buttonPins[] = {D1, D2, D3, D4};
 const char *setupfile = "/config/setup.json";
 const char *wififile = "/config/wifi.json";
 
-// Configure buttons pins
-const int buttonPins[] = {D1, D2, D3, D4}; // Array of button pins
+String ssid, password, apiUrl;
+int entryValues[4];
 
-//initiate webserver
 AsyncWebServer server(80);
+AES aes;
 
-void webRestart(AsyncWebServerRequest *request) {
-  Serial.println();
-  Serial.println("Restarting...");
-
-  ESP.restart();
+String urlEncode(const String& input) {
+  const char *hex = "0123456789ABCDEF";
+  String output = "";
+  for (int i = 0; i < input.length(); i++) {
+    char c = input.charAt(i);
+    if (isAlphaNumeric(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      output += c;
+    } else {
+      output += '%';
+      output += hex[c >> 4];
+      output += hex[c & 0xF];
+    }
+  }
+  return output;
 }
 
-void saveSetup(AsyncWebServerRequest *request) {
-  // Get new data from setup page
-  String new_apiUrl = request->getParam("webapiurl")->value();
-  String str_entries1 = request->getParam("webentry1")->value();
-  String str_entries2 = request->getParam("webentry2")->value();
-  String str_entries3 = request->getParam("webentry3")->value();
-  String str_entries4 = request->getParam("webentry4")->value();
+// Function declarations
+void getEncryptionKey(uint8_t* key);
+void encryptData(char* input, char* output, size_t inputSize);
+void decryptData(const char* input, char* output, size_t inputSize);
+void writeEncryptedConfig(File& file, const char* config, size_t configSize);
+void readEncryptedConfig(File& file, char* config, size_t configSize);
+bool isJsonEncrypted(const char* jsonString, size_t length);
+void loadWifi();
+void saveWifiToFile(const String& new_ssid, const String& new_pass);
+void loadSetup();
+void saveSetupToFile(const String& new_apiUrl, const int new_entryValues[4]);
+void setupWebServer();
+void webRestart(AsyncWebServerRequest *request);
+void handleSaveWifi(AsyncWebServerRequest *request);
+void handleSaveSetup(AsyncWebServerRequest *request);
+void handleSetup(AsyncWebServerRequest *request);
+void handleWifi(AsyncWebServerRequest *request);
 
-  // Store entries as int
-  int new_entries1 = str_entries1.toInt();
-  int new_entries2 = str_entries2.toInt();
-  int new_entries3 = str_entries3.toInt();
-  int new_entries4 = str_entries4.toInt();
-
-  // Allocate the JSON document
-  JsonDocument doc;
-
-  // Add values in the object, apirul
-  doc["apiurl"] = new_apiUrl;
-
-  // Add array of entries
-  JsonObject entries = doc["entries"].to<JsonObject>();
-  entries["1"] = new_entries1;
-  entries["2"] = new_entries2;
-  entries["3"] = new_entries3;
-  entries["4"] = new_entries4;
-
-  // Generate the prettified JSON and send it to the Serial port.
-  Serial.println("New Configuration:");
-  serializeJsonPretty(doc, Serial);
-
-  // Save the configuration
-
-  // Delete existing file, otherwise the configuration is appended to the file
-  SD.remove(setupfile);
-
-  // Open file for writing
-  File file = SD.open(setupfile, FILE_WRITE);
-  if (!file) {
-    Serial.println(F("Failed to create new file"));
-    return;
+// Encryption functions
+void getEncryptionKey(uint8_t* key) {
+  for (int i = 0; i < KEY_SIZE; i++) {
+    key[i] = EEPROM.read(i);
   }
-
-  // Serialize JSON to file
-  if (serializeJson(doc, file) == 0) {
-    Serial.println(F("Failed to write to file"));
-  }
-
-  // Close the file
-  file.close();
-
-  // serve HTML
-  // Open the file for reading
-  File htmlFile = SD.open("html/save.html", FILE_READ);
-
-  // Check if the file opened successfully
-  if (!htmlFile) {
-    Serial.println("Failed to open setup.html");
-    request->send(500, "text/plain", "Error: Could not open file");
-    return;
-  }
-
-  // Read the entire file content into a String
-  String htmlContent = htmlFile.readString();
-
-  // Close the file
-  htmlFile.close();
-
-  // Send the response with the HTML content
-  request->send(200, "text/html", htmlContent);
 }
 
-void saveWifi(AsyncWebServerRequest *request) {
-  // Get new data from setup page
-  String new_ssid = request->getParam("webssid")->value();
-  String new_pass = request->getParam("webpass")->value();
-
-  // Allocate the JSON document
-  JsonDocument doc;
-
-  // Add values in the object
-  doc["ssid"] = new_ssid;
-  doc["password"] = new_pass;
-
-  // Generate the prettified JSON and send it to the Serial port.
-  Serial.println("New WiFi Configuration:");
-  serializeJsonPretty(doc, Serial);
-
-  // Save the configuration
-
-  // Delete existing file, otherwise the configuration is appended to the file
-  SD.remove(wififile);
-
-  // Open file for writing
-  File file = SD.open(wififile, FILE_WRITE);
-  if (!file) {
-    Serial.println(F("Failed to create new file"));
-    return;
+void encryptData(char* input, char* output, size_t inputSize) {
+  uint8_t key[KEY_SIZE];
+  getEncryptionKey(key);
+  
+  aes.set_key(key, sizeof(key));
+  
+  size_t paddedSize = (inputSize + 15) & ~15;
+  for (size_t i = 0; i < paddedSize; i += 16) {
+    aes.encrypt((uint8_t*)input + i, (uint8_t*)output + i);
   }
-
-  // Serialize JSON to file
-  if (serializeJson(doc, file) == 0) {
-    Serial.println(F("Failed to write to file"));
-  }
-
-  // Close the file
-  file.close();
-
-  // serve HTML
-  // Open the file for reading
-  File htmlFile = SD.open("html/save.html", FILE_READ);
-
-  // Check if the file opened successfully
-  if (!htmlFile) {
-    Serial.println("Failed to open save.html");
-    request->send(500, "text/plain", "Error: Could not open file");
-    return;
-  }
-
-  // Read the entire file content into a String
-  String htmlContent = htmlFile.readString();
-
-  // Close the file
-  htmlFile.close();
-
-  // Send the response with the HTML content
-  request->send(200, "text/html", htmlContent);
 }
 
+void decryptData(const char* input, char* output, size_t inputSize) {
+  uint8_t key[KEY_SIZE];
+  getEncryptionKey(key);
+  
+  aes.set_key(key, sizeof(key));
+  
+  size_t paddedSize = (inputSize + 15) & ~15;
+  for (size_t i = 0; i < paddedSize; i += 16) {
+    aes.decrypt((uint8_t*)input + i, (uint8_t*)output + i);
+  }
+  
+  while (paddedSize > 0 && output[paddedSize-1] == 0) {
+    paddedSize--;
+  }
+  output[paddedSize] = '\0';
+}
+
+void writeEncryptedConfig(File& file, const char* config, size_t configSize) {
+  size_t paddedSize = (configSize + 15) & ~15;
+  char* paddedConfig = new char[paddedSize];
+  memset(paddedConfig, 0, paddedSize);
+  memcpy(paddedConfig, config, configSize);
+  
+  char* encryptedConfig = new char[paddedSize];
+  encryptData(paddedConfig, encryptedConfig, paddedSize);
+  
+  size_t bytesWritten = file.write((uint8_t*)encryptedConfig, paddedSize);
+  
+  Serial.printf("Original size: %d, Padded size: %d, Bytes written: %d\n", configSize, paddedSize, bytesWritten);
+  
+  delete[] paddedConfig;
+  delete[] encryptedConfig;
+}
+
+void readEncryptedConfig(File& file, char* config, size_t configSize) {
+  size_t paddedSize = (configSize + 15) & ~15;
+  char* encryptedConfig = new char[paddedSize];
+  file.read((uint8_t*)encryptedConfig, paddedSize);
+  
+  decryptData(encryptedConfig, config, paddedSize);
+  
+  delete[] encryptedConfig;
+}
+
+bool isJsonEncrypted(const char* jsonString, size_t length) {
+  if (length > 0 && jsonString[0] == '{') {
+    DynamicJsonDocument doc(JSON_BUFFER_SIZE);
+    DeserializationError error = deserializeJson(doc, jsonString, length);
+    return error != DeserializationError::Ok;
+  }
+  return true;
+}
+
+// WiFi functions
 void loadWifi() {
-  // Open the setup JSON file
-  File dataFile = SD.open("config/wifi.json", FILE_READ);
+  File dataFile = SD.open(wififile, FILE_READ);
   if (!dataFile) {
     Serial.println("Failed to open wifi.json");
     return;
   }
 
-  // Read JSON data into a character array
-  char json[200];
-  dataFile.readBytes(json, sizeof(json));
+  size_t fileSize = dataFile.size();
+  char* jsonBuffer = new char[fileSize + 1];
+  
+  size_t bytesRead = dataFile.readBytes(jsonBuffer, fileSize);
+  jsonBuffer[bytesRead] = '\0';
   dataFile.close();
 
-  // Parse the JSON data
-  DynamicJsonDocument doc(768);
-  DeserializationError error = deserializeJson(doc, json);
+  bool encrypted = isJsonEncrypted(jsonBuffer, bytesRead);
+  Serial.printf("WiFi data is %s\n", encrypted ? "encrypted" : "unencrypted");
+
+  DynamicJsonDocument doc(JSON_BUFFER_SIZE);
+  DeserializationError error;
+
+  if (encrypted) {
+    char* decryptedJson = new char[fileSize];
+    decryptData(jsonBuffer, decryptedJson, fileSize);
+    error = deserializeJson(doc, decryptedJson);
+    delete[] decryptedJson;
+  } else {
+    error = deserializeJson(doc, jsonBuffer);
+  }
+
+  delete[] jsonBuffer;
+
   if (error) {
-    Serial.print(F("Parsing JSON failed: "));
+    Serial.print(F("Parsing WiFi JSON failed: "));
     Serial.println(error.c_str());
     return;
   }
 
-  // Extract data from JSON
   ssid = doc["ssid"].as<String>();
   password = doc["password"].as<String>();
+
+  if (!encrypted) {
+    Serial.println("Encrypting and saving WiFi configuration...");
+    saveWifiToFile(ssid, password);
+  }
 }
 
+void saveWifiToFile(const String& new_ssid, const String& new_pass) {
+  DynamicJsonDocument doc(JSON_BUFFER_SIZE);
+  doc["ssid"] = new_ssid;
+  doc["password"] = new_pass;
+
+  String jsonString;
+  serializeJson(doc, jsonString);
+
+  SD.remove(wififile);
+  File file = SD.open(wififile, FILE_WRITE);
+  if (!file) {
+    Serial.println(F("Failed to create WiFi config file"));
+    return;
+  }
+
+  writeEncryptedConfig(file, jsonString.c_str(), jsonString.length());
+  file.close();
+
+  Serial.println("Encrypted WiFi configuration saved to SD card");
+}
+
+// Setup functions
 void loadSetup() {
-  // Open the setup JSON file
-  File dataFile = SD.open("config/setup.json", FILE_READ);
+  File dataFile = SD.open(setupfile, FILE_READ);
   if (!dataFile) {
     Serial.println("Failed to open setup.json");
     return;
   }
 
-  // Read JSON data into a character array
-  char json[768];
-  dataFile.readBytes(json, sizeof(json));
+  size_t fileSize = dataFile.size();
+  char* jsonBuffer = new char[fileSize + 1];
+  
+  dataFile.readBytes(jsonBuffer, fileSize);
+  jsonBuffer[fileSize] = '\0';
   dataFile.close();
 
-  // Parse the JSON data
-  DynamicJsonDocument doc(768);
-  DeserializationError error = deserializeJson(doc, json);
+  bool encrypted = isJsonEncrypted(jsonBuffer, fileSize);
+  Serial.printf("Setup data is %s\n", encrypted ? "encrypted" : "unencrypted");
+
+  DynamicJsonDocument doc(JSON_BUFFER_SIZE);
+  DeserializationError error;
+
+  if (encrypted) {
+    char* decryptedJson = new char[fileSize];
+    decryptData(jsonBuffer, decryptedJson, fileSize);
+    error = deserializeJson(doc, decryptedJson);
+    delete[] decryptedJson;
+  } else {
+    error = deserializeJson(doc, jsonBuffer);
+  }
+
+  delete[] jsonBuffer;
+
   if (error) {
-    Serial.print(F("Parsing JSON failed: "));
+    Serial.print(F("Parsing setup JSON failed: "));
     Serial.println(error.c_str());
     return;
   }
 
-  // Extract data from JSON
   apiUrl = doc["apiurl"].as<String>();
   for (int i = 1; i <= 4; i++) {
     entryValues[i - 1] = doc["entries"][String(i)];
   }
+
+  Serial.print("API URL: ");
+  Serial.println(apiUrl);
+  for (int i = 0; i < 4; i++) {
+    Serial.printf("Entry ID %d: %d\n", i + 1, entryValues[i]);
+  }
+
+  if (!encrypted) {
+    Serial.println("Encrypting and saving setup configuration...");
+    saveSetupToFile(apiUrl, entryValues);
+  }
+}
+
+void saveSetupToFile(const String& new_apiUrl, const int new_entryValues[4]) {
+  DynamicJsonDocument doc(JSON_BUFFER_SIZE);
+  doc["apiurl"] = new_apiUrl;
+  JsonObject entries = doc["entries"].to<JsonObject>();
+  for (int i = 0; i < 4; i++) {
+    entries[String(i + 1)] = new_entryValues[i];
+  }
+
+  String jsonString;
+  serializeJson(doc, jsonString);
+
+  SD.remove(setupfile);
+  File file = SD.open(setupfile, FILE_WRITE);
+  if (!file) {
+    Serial.println(F("Failed to create setup file"));
+    return;
+  }
+
+  writeEncryptedConfig(file, jsonString.c_str(), jsonString.length());
+  file.close();
+
+  Serial.println("Encrypted setup configuration saved to SD card");
+}
+
+// Web server functions
+void setupWebServer() {
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    File htmlFile = SD.open("html/index.html", FILE_READ);
+    if (!htmlFile) {
+      request->send(500, "text/plain", "Error: Could not open file");
+      return;
+    }
+    String htmlContent = htmlFile.readString();
+    htmlFile.close();
+    request->send(200, "text/html", htmlContent);
+  });
+
+  server.on("/wifi", HTTP_GET, handleWifi);
+  server.on("/setup", HTTP_GET, handleSetup);
+  server.on("/saveSetup", HTTP_GET, handleSaveSetup);
+  server.on("/saveWifi", HTTP_GET, handleSaveWifi);
+  server.on("/webRestart", HTTP_GET, webRestart);
+  server.on("/logout", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(401);
+  });
+
+  AsyncElegantOTA.begin(&server);
+  server.begin();
+  Serial.println("Web server started");
+}
+
+void webRestart(AsyncWebServerRequest *request) {
+  Serial.println("Restarting...");
+  request->send(200, "text/plain", "Restarting...");
+  delay(1000);
+  ESP.restart();
+}
+
+void handleSaveWifi(AsyncWebServerRequest *request) {
+  String new_ssid = request->getParam("webssid")->value();
+  String new_pass = request->getParam("webpass")->value();
+
+  saveWifiToFile(new_ssid, new_pass);
+
+  File htmlFile = SD.open("html/save.html", FILE_READ);
+  if (!htmlFile) {
+    request->send(500, "text/plain", "Error: Could not open file");
+    return;
+  }
+  String htmlContent = htmlFile.readString();
+  htmlFile.close();
+  request->send(200, "text/html", htmlContent);
+}
+
+void handleSaveSetup(AsyncWebServerRequest *request) {
+  String new_apiUrl = request->getParam("webapiurl")->value();
+  int new_entryValues[4];
+  for (int i = 0; i < 4; i++) {
+    new_entryValues[i] = request->getParam("webentry" + String(i+1))->value().toInt();
+  }
+
+  saveSetupToFile(new_apiUrl, new_entryValues);
+
+  Serial.println("Saving new setup configuration:");
+  Serial.println("API URL: " + new_apiUrl);
+  for (int i = 0; i < 4; i++) {
+    Serial.println("Entry " + String(i+1) + ": " + String(new_entryValues[i]));
+  }
+
+  File htmlFile = SD.open("html/save.html", FILE_READ);
+  if (!htmlFile) {
+    request->send(500, "text/plain", "Error: Could not open file");
+    return;
+  }
+  String htmlContent = htmlFile.readString();
+  htmlFile.close();
+  request->send(200, "text/html", htmlContent);
+}
+
+void handleSetup(AsyncWebServerRequest *request) {
+  if(!request->authenticate(http_username, http_password))
+    return request->requestAuthentication();
+  
+  File htmlFile = SD.open("html/setup.html", FILE_READ);
+  if (!htmlFile) {
+    request->send(500, "text/plain", "Error: Could not open file");
+    return;
+  }
+  
+  String htmlContent = htmlFile.readString();
+  htmlFile.close();
+  
+  // Debug output
+  Serial.println("API URL before replacement: " + apiUrl);
+  
+  // Replace placeholders with actual data, encoding the API URL
+  htmlContent.replace("%%API_URL%%", urlEncode(apiUrl));
+  for (int i = 0; i < 4; i++) {
+    htmlContent.replace("%%ENTRY" + String(i+1) + "%%", String(entryValues[i]));
+    Serial.println("Entry " + String(i+1) + " value: " + String(entryValues[i]));
+  }
+  
+  // Check if replacement occurred
+  Serial.println("HTML content after replacement (first 200 chars): " + htmlContent.substring(0, 200));
+  
+  request->send(200, "text/html", htmlContent);
+}
+
+void handleWifi(AsyncWebServerRequest *request) {
+  if(!request->authenticate(http_username, http_password))
+    return request->requestAuthentication();
+  
+  File htmlFile = SD.open("html/wifi.html", FILE_READ);
+  if (!htmlFile) {
+    request->send(500, "text/plain", "Error: Could not open file");
+    return;
+  }
+  
+  String htmlContent = htmlFile.readString();
+  htmlFile.close();
+  
+  // Replace placeholders with actual data
+  htmlContent.replace("%%SSID%%", ssid);
+  htmlContent.replace("%%PASSWORD%%", password);
+  
+  request->send(200, "text/html", htmlContent);
 }
 
 void setup() {
-  // Serial port for debugging purposes
   Serial.begin(115200);
+  EEPROM.begin(KEY_SIZE);
 
-  // Set all button pins as input with internal pull-up resistors
   for (int pin : buttonPins) {
     pinMode(pin, INPUT_PULLUP);
   }
 
-  Serial.println();
-
-  // Initialize SD card
   if (!SD.begin(chipSelect)) {
     Serial.println("SD card initialization failed");
     return;
   }
-
   Serial.println("SD card initialized.");
 
-  // Load wireless configuration from JSON
   loadWifi();
 
-  // Connect to WiFi
-  if(password == ""){
+  if(password.isEmpty()) {
     Serial.println("Using Open SSID " + ssid);
     WiFi.begin(ssid.c_str());
   } else {
@@ -257,163 +429,42 @@ void setup() {
     WiFi.begin(ssid.c_str(), password.c_str());
   }
 
-  // Report WiFi status
   while (WiFi.status() != WL_CONNECTED) {
     Serial.println("Connecting to WiFi...");
     delay(1000);
   }
   Serial.println("WiFi Connected");
+  Serial.printf("WiFi IP: %s\n", WiFi.localIP().toString().c_str());
+  Serial.printf("WiFi MAC: %s\n", WiFi.macAddress().c_str());
 
-  // Print IP Address & MAC
-  Serial.println(WiFi.localIP());
-  Serial.println(WiFi.macAddress());
+  loadSetup();  // This function should print the configuration
 
-  // Load setup configuration from JSON
-  loadSetup();
-
-  // Print API URL
-  Serial.println("API URL: " + String(apiUrl));
-
-  // Print Entries
-  Serial.println("Entry ID 1: " + String(entryValues[0]));
-  Serial.println("Entry ID 2: " + String(entryValues[1]));
-  Serial.println("Entry ID 3: " + String(entryValues[2]));
-  Serial.println("Entry ID 4: " + String(entryValues[3]));
-
-  // Serve HTML Pages
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    // Open the file for reading
-    File htmlFile = SD.open("html/index.html", FILE_READ);
-
-    // Check if the file opened successfully
-    if (!htmlFile) {
-      Serial.println("Failed to open setup.html");
-      request->send(500, "text/plain", "Error: Could not open file");
-      return;
-    }
-
-    // Read the entire file content into a String
-    String htmlContent = htmlFile.readString();
-
-    // Close the file
-    htmlFile.close();
-
-    // Send the response with the HTML content
-    request->send(200, "text/html", htmlContent);
-  });
-
-  server.on("/wifi", HTTP_GET, [](AsyncWebServerRequest *request) {
-    // Require authentication
-    if(!request->authenticate(http_username, http_password))
-    return request->requestAuthentication();
-
-    // Open the file for reading
-    File htmlFile = SD.open("html/wifi.html", FILE_READ);
-
-    // Check if the file opened successfully
-    if (!htmlFile) {
-      Serial.println("Failed to open setup.html");
-      request->send(500, "text/plain", "Error: Could not open file");
-      return;
-    }
-
-    // Read the entire file content into a String
-    String htmlContent = htmlFile.readString();
-
-    // Close the file
-    htmlFile.close();
-
-    // Send the response with the HTML content
-    request->send(200, "text/html", htmlContent);
-  });
-
-  server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *request) {
-    // Require authentication
-    if(!request->authenticate(http_username, http_password))
-    return request->requestAuthentication();
-
-    // Open the file for reading
-    File htmlFile = SD.open("html/setup.html", FILE_READ);
-
-    // Check if the file opened successfully
-    if (!htmlFile) {
-      Serial.println("Failed to open setup.html");
-      request->send(500, "text/plain", "Error: Could not open file");
-      return;
-    }
-
-    // Read the entire file content into a String
-    String htmlContent = htmlFile.readString();
-
-    // Close the file
-    htmlFile.close();
-
-    // Send the response with the HTML content
-    request->send(200, "text/html", htmlContent);
-  });
-
-  server.on("/saveSetup", HTTP_GET, saveSetup);
-
-  server.on("/saveWifi", HTTP_GET, saveWifi);
-
-  server.on("/webRestart", HTTP_GET, webRestart);
-
-  server.on("/logout", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(401);
-  });
-
-  AsyncElegantOTA.begin(&server);  // Start ElegantOTA
-  server.begin();
-  Serial.println("Web server started");
+  setupWebServer();
 }
 
 void loop() {
   std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-  // Ignore SSL certificate validation
   client->setInsecure();
 
-  //create an HTTPClient instance using https
   HTTPClient https;
-
-  //begin https connection & set the post header
   https.begin(*client, apiUrl);
-  https.addHeader("Content-Type", "application/x-www-form-urlencoded");  //Specify content-type header
+  https.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
-  // Create https request variables
   String httpRequestData;
   int httpsResponseCode;
   String response;
 
-  // Monitor buttons for input
-  for (int pin : buttonPins) {
-    // Check if specific button is pressed (LOW state)
-    if (digitalRead(pin) == LOW) {
-      // Print message based on the pressed button
-      switch (pin) {
-        case D1:
-          Serial.println("Button 1 pressed!");
-          httpRequestData = "entryId=" + String(entryValues[0]);
-          break;
-        case D2:
-          Serial.println("Button 2 pressed!");
-          httpRequestData = "entryId=" + String(entryValues[1]);
-          break;
-        case D3:
-          Serial.println("Button 3 pressed!");
-          httpRequestData = "entryId=" + String(entryValues[2]);
-          break;
-        case D4:
-          Serial.println("Button 4 pressed!");
-          httpRequestData = "entryId=" + String(entryValues[3]);
-          break;
-      }
-      // Send HTTP POST request
+  for (int i = 0; i < 4; i++) {
+    if (digitalRead(buttonPins[i]) == LOW) {
+      Serial.printf("Button %d pressed!\n", i + 1);
+      httpRequestData = "entryId=" + String(entryValues[i]);
+      
       httpsResponseCode = https.POST(httpRequestData);
 
       if (httpsResponseCode > 0) {
-        response = https.getString();  //Get the response to the request
-        Serial.println(httpsResponseCode);  //Print return code
-        Serial.println(response);           //Print request answer
+        response = https.getString();
+        Serial.println(httpsResponseCode);
+        Serial.println(response);
       } else {
         Serial.print("Error on sending POST: ");
         Serial.println(httpsResponseCode);
