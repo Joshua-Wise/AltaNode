@@ -11,6 +11,7 @@ This project implements an ESP8266 microcontroller (NodeMCU) that provides contr
 - Provides a web interface for configuration of Avigilon Alta API details and WiFi.
 - Implements secure access to configuration pages with username and password authentication.
 - Saves configuration data (API URL and button entries) to the SD card.
+- Encrypts SD card data & stores key in EEPROM via AES
 - Provides Over-the-Air (OTA) updates for easy firmware updates.
 - Controls entries via button presses that make use of the Avigilon Alta API.
 
@@ -27,6 +28,8 @@ This project implements an ESP8266 microcontroller (NodeMCU) that provides contr
 - ArduinoJson library
 - AsyncElegantOTA library
 - BearSSL library
+- AES library
+- EEPROM library
 
 ### Resources
 - [Avigilon Alta API docs](https://openpath.readme.io/)
