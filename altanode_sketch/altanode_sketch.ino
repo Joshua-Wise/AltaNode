@@ -44,6 +44,29 @@ String urlEncode(const String& input) {
   return output;
 }
 
+String urlDecode(String input) {
+  String decoded = "";
+  char temp[] = "0x00";
+  unsigned int len = input.length();
+  unsigned int i = 0;
+  while (i < len) {
+    if (input[i] == '%') {
+      if (i + 2 < len) {
+        temp[2] = input[i + 1];
+        temp[3] = input[i + 2];
+        decoded += (char)strtol(temp, NULL, 16);
+        i += 2;
+      }
+    } else if (input[i] == '+') {
+      decoded += ' ';
+    } else {
+      decoded += input[i];
+    }
+    i++;
+  }
+  return decoded;
+}
+
 // Function declarations
 void getEncryptionKey(uint8_t* key);
 void encryptData(char* input, char* output, size_t inputSize);
@@ -333,6 +356,7 @@ void handleSaveWifi(AsyncWebServerRequest *request) {
 
 void handleSaveSetup(AsyncWebServerRequest *request) {
   String new_apiUrl = request->getParam("webapiurl")->value();
+  new_apiUrl = urlDecode(new_apiUrl);  // Decode the URL
   int new_entryValues[4];
   for (int i = 0; i < 4; i++) {
     new_entryValues[i] = request->getParam("webentry" + String(i+1))->value().toInt();
@@ -369,18 +393,12 @@ void handleSetup(AsyncWebServerRequest *request) {
   String htmlContent = htmlFile.readString();
   htmlFile.close();
   
-  // Debug output
-  Serial.println("API URL before replacement: " + apiUrl);
-  
   // Replace placeholders with actual data, encoding the API URL
   htmlContent.replace("%%API_URL%%", urlEncode(apiUrl));
   for (int i = 0; i < 4; i++) {
     htmlContent.replace("%%ENTRY" + String(i+1) + "%%", String(entryValues[i]));
     Serial.println("Entry " + String(i+1) + " value: " + String(entryValues[i]));
   }
-  
-  // Check if replacement occurred
-  Serial.println("HTML content after replacement (first 200 chars): " + htmlContent.substring(0, 200));
   
   request->send(200, "text/html", htmlContent);
 }
