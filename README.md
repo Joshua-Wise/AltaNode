@@ -35,6 +35,7 @@ This project implements an ESP8266 microcontroller (NodeMCU) that provides contr
 - [Avigilon Alta API docs](https://openpath.readme.io/)
 - [Project Blog Post](https://jwise.dev/aviligon-alta-api/)
 - [AltaNode32 Project](https://github.com/Joshua-Wise/AltaNode32)
+- [AltaNode32POE Project](https://github.com/Joshua-Wise/AltaNode32POE)
 
 ### Amazon Hardware List
 - [Enclosure](https://www.amazon.com/uxcell-Button-Control-Station-Aperture/dp/B07WKJM1NJ)
