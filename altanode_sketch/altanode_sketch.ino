@@ -18,7 +18,7 @@ const size_t JSON_BUFFER_SIZE = 768;
 const char* http_username = "admin";
 const char* http_password = "altanode";
 const int chipSelect = 15;
-const int buttonPins[] = {D1, D2, D3, D4};
+const int buttonPins[] = {5, 4, 0, 2};
 const char *setupfile = "/config/setup.json";
 const char *wififile = "/config/wifi.json";
 
@@ -468,26 +468,17 @@ void loop() {
   https.begin(*client, apiUrl);
   https.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
-  String httpRequestData;
-  int httpsResponseCode;
-  String response;
-
   for (int i = 0; i < 4; i++) {
     if (digitalRead(buttonPins[i]) == LOW) {
       Serial.printf("Button %d pressed!\n", i + 1);
-      httpRequestData = "entryId=" + String(entryValues[i]);
+      String httpRequestData = "entryId=" + String(entryValues[i]);
       
-      httpsResponseCode = https.POST(httpRequestData);
-
-      if (httpsResponseCode > 0) {
-        response = https.getString();
-        Serial.println(httpsResponseCode);
-        Serial.println(response);
-      } else {
-        Serial.print("Error on sending POST: ");
-        Serial.println(httpsResponseCode);
-      }
+      https.sendRequest("POST", httpRequestData);
+      
+      // No need to wait for or process the response
       delay(500); // Debounce delay
     }
   }
+
+  https.end();
 }
